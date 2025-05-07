@@ -1,0 +1,85 @@
+params:
+  seed: 42
+
+  # environment wrapper clipping
+  env:
+    clip_observations: 100.0
+    clip_actions: 100.0
+
+  algo:
+    name: a2c_continuous
+
+  model:
+    name: continuous_a2c_logstd
+
+  network:
+    name: actor_critic
+    separate: False
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: "softplus"  # Activation for std dev outputs
+        
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: -1.0  # Initialize log_std to -1.0
+        fixed_sigma: False  # Enable learnable standard deviations
+        learn_sigma: True   # Ensure sigma is learnable
+    mlp:
+      units: [512, 256, 128]  # Increased network capacity
+      activation: elu  # Keeping ELU activation as in original
+      d2rl: True  # Enable residual connections
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+  load_checkpoint: False # flag which sets whether to load the checkpoint
+  load_path: '' # path to the checkpoint to load
+
+  config:
+    name: franka_lift
+    env_name: rlgpu
+    device: 'cuda:0'
+    device_name: 'cuda:0'
+    multi_gpu: False
+    ppo: True
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    value_bootstrap: False
+    num_actors: -1
+    reward_shaper:
+      scale_value: 0.05  # Adjusted reward scaling
+    normalize_advantage: True
+    gamma: 0.995  # Slightly increased discount factor
+    tau: 0.95
+    learning_rate: 5e-5  # Lower initial learning rate for stability with learnable std
+    lr_schedule: adaptive
+    schedule_type: legacy
+    kl_threshold: 0.008  # Slightly lower KL threshold for more conservative updates
+    score_to_win: 100000000
+    max_epochs: 5000
+    save_best_after: 100
+    save_frequency: 50
+    print_stats: True
+    grad_norm: 1.0
+    entropy_coef: 0.005  # Increased for better exploration
+    entropy_coef_schedule: [0.005, 0.001]  # Gradually decrease entropy
+    entropy_coef_schedule_steps: 1000  # Steps to anneal entropy
+    truncate_grads: True
+    e_clip: 0.2
+    horizon_length: 48  # Doubled horizon length
+    minibatch_size: 12288  # Halved minibatch size
+    mini_epochs: 12  # Increased mini epochs
+    critic_coef: 2  # Reduced critic coefficient
+    clip_value: True
+    clip_actions: False
+    seq_len: 4
+    bounds_loss_coef: 0.0005  # Slightly increased bounds loss
+    min_std: 0.1  # Minimum standard deviation
+    max_std: 1.0  # Maximum standard deviation
+    adaptive_std: True  # Enable adaptive standard deviation scaling

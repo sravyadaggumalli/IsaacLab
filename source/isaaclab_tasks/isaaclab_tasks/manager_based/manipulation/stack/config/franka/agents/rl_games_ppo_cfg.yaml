@@ -1,0 +1,90 @@
+# Configuration for RL-Games PPO agent for FrankaCubeStack task.
+# Based on parameters from IsaacGymEnvs FrankaCubeStackPPO.yaml example.
+# Generated: Thursday, May 1, 2025 at 1:04 AM CDT (Grapevine, Texas)
+
+params:
+  seed: 42 # Can be overridden by command line --seed
+
+  # environment wrapper clipping (standard values)
+  env:
+    clip_observations: 100.0
+    clip_actions: 100.0
+
+  algo:
+    name: a2c_continuous # RL-Games base name for continuous PPO/A2C
+
+  model:
+    name: continuous_a2c_logstd
+
+  network:
+    name: actor_critic
+    separate: False # Shared backbone for actor/critic
+
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None # Activation for learned sigma if fixed_sigma=False
+
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0 # Initial value for action std deviation
+        fixed_sigma: True # *** NOTE: Sigma is NOT learned. Exploration relies on policy mean and potentially entropy. ***
+                          # *** This might still need changing (set to False) if agent doesn't explore. ***
+    mlp:
+      units: [256, 128, 64] # Network size from IGE example
+      activation: elu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+  load_checkpoint: False # Default: start training from scratch
+  load_path: '' # Path to checkpoint if load_checkpoint is True
+
+  config:
+    name: franka_stack # Experiment name from IGE example
+    #full_experiment_name: ${.name} # Uses the name above for log directory
+    env_name: rlgpu # Must match registration in Isaac Lab RLG wrapper
+    device: 'cuda:0' # Default GPU, can be overridden
+    device_name: 'cuda:0' # Default GPU, can be overridden
+    multi_gpu: False # Default, can be overridden by --distributed
+    ppo: True # Enable PPO-specific objective
+    mixed_precision: False # Usually False unless needed for performance
+    normalize_input: True # Use running mean/std for observations
+    normalize_value: True # Normalize value function targets
+    value_bootstrap: True # Use critic value for final step if episode truncated (from IGE)
+    num_actors: -1 # Infer number of envs from environment config
+    reward_shaper:
+      scale_value: 1.0 # *** KEY: Use raw environment rewards (from IGE) ***
+    normalize_advantage: True # Normalize advantages
+    gamma: 0.99 # Discount factor
+    tau: 0.95 # GAE lambda parameter
+    learning_rate: 5e-4 # *** KEY: Higher learning rate (from IGE) ***
+    lr_schedule: adaptive # Adjust LR based on KL divergence
+    schedule_type: standard # LR schedule type (from IGE)
+    kl_threshold: 0.008 # Target KL for adaptive LR (from IGE)
+    score_to_win: 10000 # Arbitrary success threshold
+    max_epochs: 1500 # Total 10000 training iterations (from IGE default)
+    save_best_after: 200 # Start saving best checkpoint after 200 epochs
+    save_frequency: 100 # Save checkpoints every 100 epochs
+    print_stats: True # Print training stats to console
+    grad_norm: 1.0 # Clip gradient norm
+    entropy_coef: 0.0 # *** KEY: No entropy bonus (from IGE) ***
+                       # *** May need to re-introduce if agent doesn't explore. ***
+    truncate_grads: True # Clip gradients by norm value
+    e_clip: 0.2 # PPO clipping parameter
+    horizon_length: 32 # Steps per env per rollout (from IGE)
+    minibatch_size: 16384 # Minibatch size for updates (from IGE)
+                      # Check if divisible by num_envs * horizon_length / mini_epochs
+                      # e.g., 4096 * 32 / 5 = 26214.4 -> Might need adjustment?
+                      # Let's keep IGE value for now. RL-Games handles imperfect division.
+    mini_epochs: 5 # Number of optimization passes per rollout (from IGE)
+    critic_coef: 4 # Weight for value function loss (from IGE)
+    clip_value: True # Use clipped value loss
+    clip_actions: False # Action clipping within PPO loss (usually False for PPO)
+    seq_len: 4 # Sequence length (often used for buffer/batching, not necessarily recurrence)
+    bounds_loss_coef: 0.0001 # Penalty for actions near bounds (only active if clip_actions: True)

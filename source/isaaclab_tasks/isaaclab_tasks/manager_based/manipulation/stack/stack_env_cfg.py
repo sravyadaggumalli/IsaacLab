@@ -88,8 +88,8 @@ class ObservationsCfg:
         gripper_pos = ObsTerm(func=mdp.gripper_pos)
 
         def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = False
+            self.enable_corruption = True
+            self.concatenate_terms = True
 
     @configclass
     class RGBCameraPolicyCfg(ObsGroup):
