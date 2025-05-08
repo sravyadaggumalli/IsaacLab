@@ -18,12 +18,16 @@ if TYPE_CHECKING:
 
 
 def object_is_lifted(
-    env: ManagerBasedRLEnv, minimal_height: float, object_cfg: SceneEntityCfg = SceneEntityCfg("object")
+    env: ManagerBasedRLEnv,
+    minimal_height: float,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Reward the agent for lifting the object above the minimal height."""
     object: RigidObject = env.scene[object_cfg.name]
-    table_z = env.scene.env_origins[:, 2] # Get the Z-origin for each env
-    return torch.where(object.data.root_pos_w[:, 2] > table_z + minimal_height, 1.0, 0.0)
+    table_z = env.scene.env_origins[:, 2]  # Get the Z-origin for each env
+    return torch.where(
+        object.data.root_pos_w[:, 2] > table_z + minimal_height, 1.0, 0.0
+    )
 
 
 def object_ee_distance(
@@ -40,11 +44,13 @@ def object_ee_distance(
     ee_idx = 0
     num_targets = ee_frame.data.target_pos_w.shape[-2]
     if not (ee_idx < num_targets):
-         print(f"Warning: 'end_effector' frame index ({ee_idx}) out of bounds for FrameTransformer data shape {ee_frame.data.target_pos_w.shape}. Check FrameTransformerCfg.")
-         return torch.zeros(env.num_envs, device=env.device)
+        print(
+            f"Warning: 'end_effector' frame index ({ee_idx}) out of bounds for FrameTransformer data shape {ee_frame.data.target_pos_w.shape}. Check FrameTransformerCfg."
+        )
+        return torch.zeros(env.num_envs, device=env.device)
 
     cube_pos_w = object.data.root_pos_w
-    ee_w = ee_frame.data.target_pos_w[..., ee_idx, :] # Use the index
+    ee_w = ee_frame.data.target_pos_w[..., ee_idx, :]  # Use the index
     object_ee_distance = torch.norm(cube_pos_w - ee_w, dim=1)
     return 1 - torch.tanh(object_ee_distance / std)
 
@@ -59,12 +65,14 @@ def object_goal_distance(
 ) -> torch.Tensor:
     """Reward the agent for tracking the goal pose using tanh-kernel."""
     # extract the used quantities (to enable type-hinting)
-    robot: Articulation = env.scene[robot_cfg.name] # Robot is Articulation
+    robot: Articulation = env.scene[robot_cfg.name]  # Robot is Articulation
     object: RigidObject = env.scene[object_cfg.name]
     command = env.command_manager.get_command(command_name)
     # compute the desired position in the world frame
-    des_pos_b = command[:, :3] # Target pose is relative to robot base
-    des_pos_w, _ = combine_frame_transforms(robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pos_b)
+    des_pos_b = command[:, :3]  # Target pose is relative to robot base
+    des_pos_w, _ = combine_frame_transforms(
+        robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pos_b
+    )
     # distance of the end-effector to the object: (num_envs,)
     distance = torch.norm(des_pos_w - object.data.root_pos_w[:, :3], dim=1)
     table_z = env.scene.env_origins[:, 2]
@@ -77,46 +85,37 @@ def penalize_wrong_grasp(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
-    distractor_cube_cfg: SceneEntityCfg = SceneEntityCfg("object"), # Provide the specific distractor cube
-    close_grasp_dist_thresh: float = 0.05, # Threshold for finger distance to cube center
-    closed_joint_pos_thresh: float = 0.01, # Threshold for sum of finger joint positions to consider closed
+    distractor_cube_cfg: SceneEntityCfg = SceneEntityCfg(
+        "object"
+    ),  # Provide the specific distractor cube
+    grasp_dist_thresh: float = 0.06,  # Threshold for finger distance to cube center
+    closed_joint_pos_thresh: float = 0.01,  # Threshold for sum of finger joint positions to consider closed
 ) -> torch.Tensor:
-    
     """Penalize the agent for grasping a distractor cube."""
     robot: Articulation = env.scene[robot_cfg.name]
     distractor_cube: RigidObject = env.scene[distractor_cube_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
 
     # Check if gripper is closed based on joint positions
+    ee_idx = 0  # let index 0 is 'end_effector'
+    if not (ee_idx < ee_frame.data.target_pos_w.shape[-2]):
+        return torch.zeros(env.num_envs, device=env.device)
+    end_effector_pos = ee_frame.data.target_pos_w[..., ee_idx, :]
+    object_pos = distractor_cube.data.root_pos_w
+    pose_diff = torch.linalg.vector_norm(object_pos - end_effector_pos, dim=1)
+    is_close = pose_diff < grasp_dist_thresh
+
+    # Gripper is Closed (using sum of joint positions)
     finger_joint_ids = robot.find_joints("panda_finger_joint.*")[0]
     if len(finger_joint_ids) != 2:
         return torch.zeros(env.num_envs, device=env.device)
     finger_joint_pos = robot.data.joint_pos[:, finger_joint_ids]
     gripper_is_closed = finger_joint_pos.sum(dim=1) < closed_joint_pos_thresh
 
-    # Check proximity of fingertips to the distractor cube
-    # Use hardcoded indices based on FrameTransformerCfg order end_effector (0), tool_rightfinger (1), tool_leftfinger (2)
-    right_finger_idx = 1
-    left_finger_idx = 2
-
-    # Safety check for indices
-    num_targets = ee_frame.data.target_pos_w.shape[-2]
-    if not (right_finger_idx < num_targets and left_finger_idx < num_targets):
-         print(f"Warning: Fingertip frame indices ({left_finger_idx}, {right_finger_idx}) out of bounds for FrameTransformer data shape {ee_frame.data.target_pos_w.shape}. Check FrameTransformerCfg.")
-         return torch.zeros(env.num_envs, device=env.device)
-
-    # Access data using the correct indices
-    left_finger_pos_w = ee_frame.data.target_pos_w[..., left_finger_idx, :]
-    right_finger_pos_w = ee_frame.data.target_pos_w[..., right_finger_idx, :]
-
-    distractor_pos_w = distractor_cube.data.root_pos_w[:, :3]
-    dist_left_finger = torch.norm(left_finger_pos_w - distractor_pos_w, dim=1)
-    dist_right_finger = torch.norm(right_finger_pos_w - distractor_pos_w, dim=1)
-    fingers_are_close = (dist_left_finger < close_grasp_dist_thresh) & (dist_right_finger < close_grasp_dist_thresh)
-
-    # Apply penalty if gripper is closed AND fingers are close to the distractor
-    penalty = (gripper_is_closed & fingers_are_close).float()
+    # Apply penalty if EE is close AND gripper is closed
+    penalty = (is_close & gripper_is_closed).float()
     return penalty
+
 
 def reward_cube_placement(
     env: ManagerBasedRLEnv,
@@ -134,7 +133,12 @@ def reward_cube_placement(
     # Target pose from command (relative to robot base)
     des_pose_b = command[:, :7]
     # Convert target pose to world frame
-    des_pos_w, _ = combine_frame_transforms(robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pose_b[:, :3], des_pose_b[:, 3:7])
+    des_pos_w, _ = combine_frame_transforms(
+        robot.data.root_state_w[:, :3],
+        robot.data.root_state_w[:, 3:7],
+        des_pose_b[:, :3],
+        des_pose_b[:, 3:7],
+    )
 
     # Current object pose
     object_pos_w = object.data.root_pos_w[:, :3]
@@ -160,7 +164,6 @@ def reward_holding_object(
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     closed_joint_pos_thresh: float = 0.01,
 ) -> torch.Tensor:
-    
     """Reward the agent for holding the object above a height AND moving towards the target position."""
     object: RigidObject = env.scene[object_cfg.name]
     robot: Articulation = env.scene[robot_cfg.name]
@@ -177,20 +180,24 @@ def reward_holding_object(
     finger_joint_pos = robot.data.joint_pos[:, finger_joint_ids]
     gripper_is_closed = finger_joint_pos.sum(dim=1) < closed_joint_pos_thresh
 
-    is_holding = (object_is_lifted_flag & gripper_is_closed)
+    is_holding = object_is_lifted_flag & gripper_is_closed
 
     # Get Distance to target placement pose
     command = env.command_manager.get_command(command_name)
-    des_pose_b = command[:, :7] # Get target pose relative to robot base
+    des_pose_b = command[:, :7]  # Get target pose relative to robot base
     # Convert target pose to world frame
-    des_pos_w, _ = combine_frame_transforms(robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pose_b[:, :3], des_pose_b[:, 3:7])
+    des_pos_w, _ = combine_frame_transforms(
+        robot.data.root_state_w[:, :3],
+        robot.data.root_state_w[:, 3:7],
+        des_pose_b[:, :3],
+        des_pose_b[:, 3:7],
+    )
     # Current object position
     object_pos_w = object.data.root_pos_w[:, :3]
     # Calculate distance
     distance_to_target_pos = torch.norm(des_pos_w[:, :2] - object_pos_w[:, :2], dim=1)
-
     # Calculate reward based on distance
-    distance_reward = (1 - torch.tanh(distance_to_target_pos / std_distance))
+    distance_reward = 1 - torch.tanh(distance_to_target_pos / std_distance)
 
     # reward ONLY when actively holding the object
     final_reward = is_holding.float() * distance_reward
